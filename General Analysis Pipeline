@@ -1,0 +1,204 @@
+#############################################################################################################################
+## Processing Log for Silver, Willett et al (2023)
+## Code written by Kelsey Maher, Courtney Willett and Marko Bijaic
+##############################################################################################################################
+
+#----------------------------------------------------------------------------------------------------------------------------
+## Making Proximal Intergenic Enhancer Bed File
+
+# PROXIMAL INTERGENIC
+# All accessible sites that are: </=2kb upstream of a TSS (and NOT in another gene) and >100bp upstream of a TSS
+#                                       </=1kb downstream of a TES (and NOT in another gene) and >100bp downstream of a TES
+                                       
+
+
+# Intersect with the accessible sites data.  What results is all accessible sites within genes (Genic site).   
+
+bedtools intersect -a ATAC-seq_peaks.bed -b gene_bodies-TSS_TES-plus1.bed > AllAccSitesInGenes_TSSAnd1bp-TESAnd1bp.bed  ;
+
+#FINAL GENIC SITES FILE:  NH_TAIR10_intersect_AllAccSitesInGenes_TSSAnd1bp-TESAnd1bp.bed
+
+#-------------------------------------------------------------------------------
+
+# EXPANDED GENIC SITES (All accessible sites that are: </=100bp upstream of a TSS, TSS-TES, and </=100bp downstream of a TES) &&
+
+
+awk '{print $1"\t"($2-=100)"\t"($3+=100)"\t"($4)"\t"($5)"\t"($6)}' PlusStrandGenes.bed > PlusStrandGenes_100bpUpstrTSS_100bpDwnstrTES.6Cols.txt ;
+
+awk '{print $1"\t"($2-=100)"\t"($3+=100)"\t"($4)"\t"($5)"\t"($6)}' MinusStrandGenes.bed > MinusStrandGenes_100bpUpstrTSS_100bpDwnstrTES.6Cols.txt ;
+
+# Combine into one document (copy-paste): ALLGenes_100bpUpstrTSS_100bpDwnstrTES.6Cols.bed
+
+#-------------------------------------------------------------------------------
+     
+# Intersect with the accessible sites data.  What results is all accessible sites within 100bp of a TSS, within the gene body, or within 100bp of a TES (= Up100bp-TSS-TES-Dwn100bp range) 
+
+
+bedtools intersect -a ATAC-seq_peaks.bed -b ALLGenes_100bpUpstrTSS_100bpDwnstrTES.bed > AllAccSites100bpUpstrTSS-100bpDwnstrTES.bed  ;
+
+# FINAL EXPANDED GENIC SITES FILE: NH_TAIR10_intersect_AllAccSites100bpUpstrTSS-100bpDwnstrTES.bed
+
+#-------------------------------------------------------------------------------
+
+# Subtract Expanded Genic sites from all accessible sites within 2kb of a TSS, within the gene body, or within 1kb of a TES (= Up2kb-TSS-TES-Dwn1kb range), and you'll be left with your desired Proximal Intergenic sites.
+
+bedtools subtract -a AllAccSites2kbUpstrTSS-1kbDwnstrTES.bed -b AllAccSites100bpUpstrTSS-100bpDwnstrTES.bed > subtract_AllAccSites2kbUpstrTSS-100bpUpstrTSS-100bpDwnstrTES-1kbDwnstrTES.bed
+
+# FINAL PROXIMAL INTERGENIC SITES FILE: subtract_AllAccSites2kbUpstrTSS-100bpUpstrTSS-100bpDwnstrTES-1kbDwnstrTES.bed
+
+
+
+##############################################################################################################################
+# Processing ChiP, ATAC, and GRO-seq data
+##############################################################################################################################
+
+# General processing pipeline for fastq files
+
+bowtie2 -p 6 -x REF_GENOME file.fastq -S file.sam ;
+samtools view -bS -o file.bam file.sam ;
+samtools sort -file.bam file ;
+samtools view -q 2 file.bam > file.bam;
+samtools index file.bam ;
+bamCoverage --normalizeUsingRPKM -b file.bam -o file.bw -bs 1 
+
+#-------------------------------------------------------------------------------
+
+# Separate strand fro GRO, pNET, and 5-EU RNA-seq
+
+# Positive
+samtools view -F 0x10 -b file.bam > file.pos.sam ;  
+samtools view -bS -o file.pos.bam file.pos.sam ; 
+samtools sort file.pos.bam -o file.pos ;
+samtools index file.pos.bam ;
+bamCoverage --normalizeUsingRPKM -b file.pos.bam -o file.pos.bw -bs 1 
+
+# Negative
+samtools view -f 0x10 -b file.bam > file.neg.sam
+samtools view -bS -o file.neg.bam file.neg.sam ; 
+samtools sort file.neg.bam -o file.neg ;
+samtools index -file.neg.bam ;
+bamCoverage --normalizeUsingRPKM -b file.neg.bam -o file.neg.bw -bs 1 
+
+#-------------------------------------------------------------------------------
+
+# Remove top/bottom 10% from nascent RNA-seq data to make new proximal intergenic regions bed file
+# Gets rid of background signal
+
+# Generate CSV file from Seqplots (no clustering)
+
+R
+setwd("Output Directory")
+
+# CSV file from seqplots
+inp_mat="seqplots_output.csv"
+
+# Bed file used to make heatmap
+inp_bed="subtract_AllAccSites2kbUpstrTSS-100bpUpstrTSS-100bpDwnstrTES-1kbDwnstrTES.bed"
+
+# Name of new bed file
+out_bed="AccSites_PROXIMAL_GROfwdGROrev_RscriptOutput_EliminateTop10percent.bed"
+
+matrix_sp=read.table(inp_mat,header=T, sep=",")
+matrix_sp[is.na(matrix_sp)]=0
+dim(matrix_sp)
+low=0
+high=90
+val_exceed_sp=matrix_sp$RowMeans>quantile(matrix_sp$RowMeans,low/100)&matrix_sp$RowMeans<quantile(matrix_sp$RowMeans,high/100)
+table(val_exceed_sp)
+selected_sp=matrix_sp[val_exceed_sp,1:10]
+selected_sp$ID=paste0(selected_sp$chromosome,selected_sp$start,selected_sp$end)
+bed_up_SP=read.delim(inp_bed,header=F)
+bed_up_SP$ID=paste0(bed_up_SP$V1,bed_up_SP$V2,bed_up_SP$V3)
+bed_up_SP$V2 <- as.numeric(bed_up_SP$V2)
+bed_up_SP$V2 <- bed_up_SP$V2+1
+bed_up_SP$ID=paste0(bed_up_SP$V1,bed_up_SP$V2,bed_up_SP$V3)
+bed_up_SP_filt=bed_up_SP[bed_up_SP$ID%in%selected_sp$ID,]
+write.table(bed_up_SP_filt[,1:3],out_bed,quote=F,row.names=F,sep = "\t",col.names=F)
+
+
+
+##############################################################################################################################
+# Calculating Skew of nascent RNA-seq data 
+##############################################################################################################################
+
+# Graph data in SeqPlots
+# log2 transform, 5 clusters, cluster by nascent RNA-seq data
+# Export cluster info from Seqplots
+
+# Calculate average bigwig signal over proximal intergenic enhancer bed file
+# https://open.bioqueue.org/home/knowledge/showKnowledge/sig/ucsc-bigwigaverageoverbed
+
+bigWigAverageOverBed file.pos.bw subtract_AllAccSites2kbUpstrTSS-100bpUpstrTSS-100bpDwnstrTES-1kbDwnstrTES.bed file.pos.tab
+# DOWNSTREAM = file.pos.tab
+
+bigWigAverageOverBed file.neg.bw subtract_AllAccSites2kbUpstrTSS-100bpUpstrTSS-100bpDwnstrTES-1kbDwnstrTES.bed file.neg.tab
+# UPSTREAM = file.neg.tab
+
+#-------------------------------------------------------------------------------
+
+R
+
+# Read in files
+gro_f <- read.table("file.pos.tab")
+gro_r <- read.table("file.neg.tab")
+c <- read.table("seqplots_output.csv",sep=",",header=T)
+
+# Merge forward and reverse files
+gro <- merge(gro_f,gro_r,by="V1")
+
+# Merge gro with cluster info
+gro <- merge(gro,c,by="V1")
+
+# Remove sites with 0 signal on either side
+gro <- gro[which(gro$V6.x >0 & gro$V6.y> 0),]
+
+# Formatting
+up <- gro[c(1,18,6)]
+down <- gro[c(1,18,11)]
+
+down$ClusterID2 <- paste(down$ClusterID,"Upstream",sep=":")
+up$ClusterID2 <- paste(up$ClusterID, "Downstream",sep=":")
+
+down$V6 <- down$V6.y
+up$V6 <- up$V6.x
+
+down <- down[,-3]
+up <- up[,-3]
+
+gro2 <- rbind(down, up)
+
+# Wilcox Test between up and downstream signal in Cluster 1
+gro1 <- gro2[which(gro2$ClusterID2 == "1:Downstream" | gro2$ClusterID2 =="1:Upstream"),]
+wilcox.test(gro1$V6 ~ gro1$ClusterID2)
+
+# Graphing
+
+library(ggplot2)
+library(ggsignif)
+
+data_summary <- function(x) {
+  m <- mean(x)
+  ymin <- m-sd(x)
+  ymax <- m+sd(x)
+  return(c(y=m,ymin=ymin,ymax=ymax))
+}
+
+# Color code by species
+group.colors=c(Arabidopsis="#3D550C", Drosophila="#00767B", Human="#C41616" )
+group.fill=c(Arabidopsis="#95A800", Drosophila="#00C2CB",Human="#FF5757")
+gro3$species <- paste('Arabidopis')
+
+# log2 + 1 normalize 
+gro3$log <- log2(gro3$V6+1)
+
+ggplot(gro, aes(x=factor(ClusterID2,level=c("1:Upstream", "1:Downstream")), y=log, color=species, fill=species)) + 
+  geom_violin() +
+  stat_summary(fun.data=data_summary) + 
+  scale_color_manual(values = group.colors)+ 
+  scale_fill_manual(values=group.fill)+
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5,face="bold",size=15),axis.title=element_text(size=15), axis.text = element_text(size = 15) ) +
+  geom_signif(
+    comparisons=list(c("1:Downstream", "1:Upstream")),map_signif_level = TRUE, test="wilcox.test", color="black") 
+
+
+
