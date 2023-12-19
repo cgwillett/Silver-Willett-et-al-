@@ -1,0 +1,60 @@
+# Courtney Willett
+# 11-3-21
+
+
+###################################################################################################
+## Dowload SRR and make fastq
+###################################################################################################
+
+# Link: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE117014
+ 
+# GSM3267344	pNET_unph_mock_rep1
+# GSM3267345	pNET_unph_mock_rep2
+# GSM3267348	pNET_Ser2P_mock_rep1
+# GSM3267349	pNET_Ser2P_mock_rep2
+# GSM3267352	pNET_Ser5P_mock_rep1
+# GSM3267353	pNET_Ser5P_mock_rep2
+
+prefetch SRR7518314
+
+# Paired-end
+fastq-dump --split-files SRR7518314
+
+###################################################################################################
+## Trim Adaptors
+###################################################################################################
+
+# Emailed author and found out that the PCR primers are still in the raw data and need to be trimmed
+# NEXTFLEX Small RNA-seq Kit 3' Adapter sequence: TGGAATTCTCGGGTGCCAAGG
+
+# Checked fastq files for sequence
+grep -c TGGAATTCTCGGGTGCCAAGG SRR7518314_*.fastq
+
+# Found 44,321,675 times in 1
+# Found 0 times in 2
+
+# Also checked reverse complement
+# Found 4 times in 1
+# Found 307 times in 2
+
+# Remove adaptor
+cutadapt -a TGGAATTCTCGGGTGCCAAGG -o YOUR_FILE.trim1.fq --minimum-length 23 YOUR_FILE.fastq.gz
+
+# Remove 4 bases on either end
+cutadapt -u 4 -u -4 -o YOUR_FILE.trim2.fq YOUR_FILE.trim1.fq
+
+###################################################################################################
+## Mapping
+###################################################################################################
+
+# Even though this is paired end, we only want the first read (which has the 3' end adapter)
+# We want the elongating RNA, hence 5' to 3'
+# Reverse is just the index--not useful information
+# Treat 1st read as SE and align as usual
+#--------------------------------------------------------------------------------------------------
+
+# To make bw files match bed file:
+
+samtools view -h pNETseq.unph.forward.merge.bam |sed -e 's/SN:1/SN:Chr1/' | sed -e 's/SN:2/SN:Chr2/' |\
+sed -e 's/SN:3/SN:Chr3/' | sed -e 's/SN:4/SN:Chr4/' |\
+sed -e 's/SN:5/SN:Chr5/' | samtools reheader - pNETseq.unph.forward.merge.bam > pNETseq.unph.forward.merge.chr.bam
