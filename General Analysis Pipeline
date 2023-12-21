@@ -167,7 +167,7 @@ up <- up[,-3]
 
 gro2 <- rbind(down, up)
 
-# Wilcox Test between up and downstream signal in Cluster 1
+# Wilcox Rank Sum Test between up and downstream signal in Cluster 1
 gro1 <- gro2[which(gro2$ClusterID2 == "1:Downstream" | gro2$ClusterID2 =="1:Upstream"),]
 wilcox.test(gro1$V6 ~ gro1$ClusterID2)
 
